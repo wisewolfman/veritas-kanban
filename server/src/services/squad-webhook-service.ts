@@ -74,15 +74,11 @@ async function fireOpenClawWake(
   const wakeText = `🗨️ Squad chat from ${displayName}: ${message.message}`;
 
   const payload = {
-    tool: 'cron',
-    args: {
-      action: 'wake',
-      text: wakeText,
-      mode: 'now',
-    },
+    text: wakeText,
+    mode: 'now',
   };
 
-  const url = `${settings.openclawGatewayUrl}/tools/invoke`;
+  const url = `${settings.openclawGatewayUrl}/hooks/wake`;
 
   try {
     const controller = new AbortController();

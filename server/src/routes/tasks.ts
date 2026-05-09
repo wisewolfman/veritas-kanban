@@ -7,6 +7,7 @@ import { getBlockingService } from '../services/blocking-service.js';
 import { getGitHubSyncService } from '../services/github-sync-service.js';
 import { getDelegationService } from '../services/delegation-service.js';
 import { getProgressService } from '../services/progress-service.js';
+import { TemplateService } from '../services/template-service.js';
 import type { CreateTaskInput, UpdateTaskInput, Task, TaskSummary } from '@veritas-kanban/shared';
 import { broadcastTaskChange } from '../services/broadcast-service.js';
 import { asyncHandler } from '../middleware/async-handler.js';
@@ -23,6 +24,7 @@ const worktreeService = new WorktreeService();
 const blockingService = getBlockingService();
 const delegationService = getDelegationService();
 const progressService = getProgressService();
+const templateService = new TemplateService();
 
 // Validation schemas
 const reviewCommentSchema = z.object({
@@ -870,6 +872,46 @@ router.post(
       throw new NotFoundError('Task not found');
     }
 
+    const template = await templateService.getTemplate(templateId);
+    if (!template) {
+      throw new NotFoundError(`Template not found: ${templateId}`);
+    }
+
+    const selected = new Set(fieldsChanged || []);
+    const applyAll = selected.size === 0;
+    const shouldApply = (field: string): boolean => applyAll || selected.has(field);
+
+    const update: UpdateTaskInput = {};
+
+    if (shouldApply('type') && template.taskDefaults.type) update.type = template.taskDefaults.type;
+    if (shouldApply('priority') && template.taskDefaults.priority)
+      update.priority = template.taskDefaults.priority;
+    if (shouldApply('project') && template.taskDefaults.project)
+      update.project = template.taskDefaults.project;
+    if (shouldApply('agent') && template.taskDefaults.agent)
+      update.agent = template.taskDefaults.agent;
+
+    if (shouldApply('description') && template.taskDefaults.descriptionTemplate) {
+      update.description = template.taskDefaults.descriptionTemplate;
+    }
+
+    if (
+      shouldApply('subtasks') &&
+      template.subtaskTemplates &&
+      template.subtaskTemplates.length > 0
+    ) {
+      const sorted = [...template.subtaskTemplates].sort((a, b) => a.order - b.order);
+      update.subtasks = sorted.map((s) => ({
+        id: `subtask_${crypto.randomUUID()}`,
+        title: s.title,
+        completed: false,
+        created: new Date().toISOString(),
+      }));
+    }
+
+    const updatedTask =
+      Object.keys(update).length > 0 ? await taskService.updateTask(task.id, update) : task;
+
     // Log activity for template application
     await activityService.logActivity(
       'template_applied',
@@ -877,13 +919,20 @@ router.post(
       task.title,
       {
         templateId,
-        templateName: templateName || 'Unknown',
-        fieldsChanged: fieldsChanged || [],
+        templateName: templateName || template.name || 'Unknown',
+        fieldsChanged: fieldsChanged || [
+          'type',
+          'priority',
+          'project',
+          'agent',
+          'description',
+          'subtasks',
+        ],
       },
       task.agent
     );
 
-    res.json({ success: true });
+    res.json({ success: true, task: updatedTask });
   })
 );
 

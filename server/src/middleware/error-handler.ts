@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger('error-handler');
@@ -61,6 +62,20 @@ export class InternalError extends AppError {
 // Express error handling middleware (4 args)
 export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction) {
   const requestId: string | undefined = res.locals.requestId;
+
+  // Handle multer upload errors (field name mismatch, file size, count limit)
+  if (err instanceof multer.MulterError) {
+    const messages: Record<string, string> = {
+      LIMIT_FILE_SIZE: 'File too large',
+      LIMIT_FILE_COUNT: 'Too many files',
+      LIMIT_UNEXPECTED_FILE: 'Unexpected field name — use "files" as the form field name',
+    };
+    return res.status(400).json({
+      code: 'UPLOAD_ERROR',
+      message: messages[err.code] ?? `Upload error: ${err.message}`,
+      details: { multerCode: err.code, field: err.field },
+    });
+  }
 
   if (err instanceof AppError) {
     // Produce a standardised error object that the response-envelope
